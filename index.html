@@ -19,7 +19,7 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             background-color: white;
             border-radius: 8px;
@@ -29,8 +29,51 @@
 
         h1 {
             color: #333;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             text-align: center;
+        }
+
+        .controls {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .control-group label {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .control-group input[type="number"] {
+            width: 80px;
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .apply-button {
+            background-color: #2196F3;
+            color: white;
+            padding: 6px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+
+        .apply-button:hover {
+            background-color: #1976D2;
         }
 
         .upload-area {
@@ -103,39 +146,84 @@
             margin-bottom: -2px;
         }
 
+        .table-wrapper {
+            position: relative;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+            max-height: 600px;
+        }
+
         .table-container {
             overflow: auto;
             max-height: 600px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
         }
 
         table {
-            width: 100%;
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0;
             font-size: 14px;
+            position: relative;
         }
 
         th, td {
             border: 1px solid #ddd;
             padding: 8px;
             text-align: left;
+            position: relative;
         }
 
-        th {
-            background-color: #f8f8f8;
+        /* Header styling */
+        thead th {
+            background-color: #e0e0e0;
             font-weight: 600;
             position: sticky;
             top: 0;
+            z-index: 20;
+            border-top: none;
+        }
+
+        /* Line numbers column */
+        .line-number {
+            background-color: #e0e0e0;
+            font-weight: 600;
+            text-align: center;
+            position: sticky;
+            left: 0;
             z-index: 10;
+            min-width: 50px;
+            border-left: none;
         }
 
-        tr:nth-child(even) {
-            background-color: #f9f9f9;
+        thead .line-number {
+            z-index: 30;
         }
 
-        tr:hover {
-            background-color: #f0f0f0;
+        /* Row coloring */
+        tbody tr:nth-child(odd) td:not(.line-number) {
+            background-color: white;
+        }
+
+        tbody tr:nth-child(even) td:not(.line-number) {
+            background-color: #f0f8f0; /* Very light green */
+        }
+
+        /* Column coloring - applied after row coloring */
+        tbody td:nth-child(odd):not(.line-number) {
+            background-color: white;
+        }
+
+        tbody td:nth-child(even):not(.line-number) {
+            background-color: #fffef0; /* Very light yellow */
+        }
+
+        /* Combined row and column coloring */
+        tbody tr:nth-child(even) td:nth-child(even):not(.line-number) {
+            background-color: #f5fdf5; /* Mix of light green and light yellow */
+        }
+
+        tr:hover td:not(.line-number) {
+            background-color: #e8f5e9 !important;
         }
 
         .empty-cell {
@@ -157,12 +245,31 @@
             padding: 20px;
             color: #666;
         }
+
+        .stats {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Excel File Viewer</h1>
         
+        <div class="controls">
+            <div class="control-group">
+                <label for="rowsInput">Rows to display:</label>
+                <input type="number" id="rowsInput" min="10" max="1000" value="50">
+            </div>
+            <div class="control-group">
+                <label for="colsInput">Columns to display:</label>
+                <input type="number" id="colsInput" min="5" max="100" value="20">
+            </div>
+            <button class="apply-button" onclick="applyViewSettings()">Apply</button>
+        </div>
+
         <div class="upload-area" id="uploadArea">
             <label for="fileInput" class="upload-button">Choose Excel File</label>
             <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
@@ -174,21 +281,30 @@
 
         <div id="sheetsContainer" style="display: none;">
             <div class="sheet-tabs" id="sheetTabs"></div>
-            <div class="table-container" id="tableContainer"></div>
+            <div class="table-wrapper">
+                <div class="table-container" id="tableContainer"></div>
+            </div>
+            <div class="stats" id="stats"></div>
         </div>
     </div>
 
     <script>
         let workbook = null;
         let currentSheet = null;
+        let fullData = null;
+        let maxRows = 50;
+        let maxCols = 20;
 
-        // File input handling
+        // Get elements
         const fileInput = document.getElementById('fileInput');
         const uploadArea = document.getElementById('uploadArea');
         const sheetsContainer = document.getElementById('sheetsContainer');
         const sheetTabs = document.getElementById('sheetTabs');
         const tableContainer = document.getElementById('tableContainer');
         const errorMessage = document.getElementById('errorMessage');
+        const rowsInput = document.getElementById('rowsInput');
+        const colsInput = document.getElementById('colsInput');
+        const stats = document.getElementById('stats');
 
         fileInput.addEventListener('change', handleFile);
 
@@ -295,22 +411,77 @@
             // Get worksheet
             const worksheet = workbook.Sheets[sheetName];
             
-            // Convert to HTML table
-            const html = XLSX.utils.sheet_to_html(worksheet, {
-                header: 1,
-                editable: false
-            });
+            // Convert to array of arrays
+            fullData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
             
-            // Display table
-            tableContainer.innerHTML = html;
+            // Display table with current view settings
+            displayTable();
+        }
+
+        function displayTable() {
+            if (!fullData || fullData.length === 0) {
+                tableContainer.innerHTML = '<div class="loading">No data to display</div>';
+                return;
+            }
+
+            const displayRows = Math.min(maxRows, fullData.length);
+            const displayCols = Math.min(maxCols, fullData[0].length);
+
+            let html = '<table><thead><tr>';
             
-            // Style empty cells
-            const cells = tableContainer.querySelectorAll('td');
-            cells.forEach(cell => {
-                if (cell.textContent.trim() === '') {
-                    cell.innerHTML = '<span class="empty-cell">-</span>';
+            // Header row with line number column
+            html += '<th class="line-number">#</th>';
+            
+            // Column headers (A, B, C, etc.)
+            for (let col = 0; col < displayCols; col++) {
+                const colLetter = String.fromCharCode(65 + col);
+                html += `<th>${colLetter}</th>`;
+            }
+            html += '</tr></thead><tbody>';
+
+            // Data rows
+            for (let row = 0; row < displayRows; row++) {
+                html += '<tr>';
+                html += `<td class="line-number">${row + 1}</td>`;
+                
+                for (let col = 0; col < displayCols; col++) {
+                    const cellValue = fullData[row] && fullData[row][col] !== undefined ? fullData[row][col] : '';
+                    const displayValue = cellValue === '' ? '<span class="empty-cell">-</span>' : escapeHtml(cellValue.toString());
+                    html += `<td>${displayValue}</td>`;
                 }
-            });
+                html += '</tr>';
+            }
+            
+            html += '</tbody></table>';
+            tableContainer.innerHTML = html;
+
+            // Update stats
+            const totalRows = fullData.length;
+            const totalCols = fullData[0].length;
+            stats.textContent = `Showing ${displayRows} of ${totalRows} rows, ${displayCols} of ${totalCols} columns`;
+        }
+
+        function applyViewSettings() {
+            const newMaxRows = parseInt(rowsInput.value);
+            const newMaxCols = parseInt(colsInput.value);
+            
+            if (newMaxRows >= 10 && newMaxRows <= 1000) {
+                maxRows = newMaxRows;
+            }
+            
+            if (newMaxCols >= 5 && newMaxCols <= 100) {
+                maxCols = newMaxCols;
+            }
+            
+            if (fullData) {
+                displayTable();
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         function showError(message) {
@@ -319,8 +490,22 @@
         }
 
         function hideError() {
-            errorMessage.style.display = 'none';
+            errorMessage
+                        errorMessage.style.display = 'none';
         }
+
+        // Allow Enter key to apply settings
+        rowsInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                applyViewSettings();
+            }
+        });
+
+        colsInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                applyViewSettings();
+            }
+        });
     </script>
 </body>
 </html>
